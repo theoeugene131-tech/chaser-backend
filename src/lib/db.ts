@@ -19,7 +19,14 @@ import { Pool } from "pg";
  */
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgres://postgres:devpassword@localhost:5432/chaser",
+  host: process.env.PGHOST,
+  port: Number(process.env.PGPORT),
+  database: process.env.PGDATABASE,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: false }
+    : false,
 });
 
 export async function ensureSchema() {
