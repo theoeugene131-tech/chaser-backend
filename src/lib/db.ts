@@ -18,13 +18,7 @@ import { Pool } from "pg";
  * table by table, without a big-bang rewrite.
  */
 
-const pool = console.log({
-  PGHOST: process.env.PGHOST,
-  PGPORT: process.env.PGPORT,
-  PGDATABASE: process.env.PGDATABASE,
-  PGUSER: process.env.PGUSER,
-  DATABASE_URL: process.env.DATABASE_URL,
-});new Pool({
+const pool = new Pool({
   host: process.env.PGHOST,
   port: Number(process.env.PGPORT),
   database: process.env.PGDATABASE,
@@ -88,3 +82,4 @@ export const db = {
     await pool.end();
   },
 };
+
