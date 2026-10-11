@@ -47,7 +47,17 @@ function resolvePoolConfig() {
   }
   return { connectionString: "postgres://postgres:devpassword@localhost:5432/chaser" };
 }
+const url = process.env.DATABASE_URL;
 
+console.log("DATABASE_URL present:", Boolean(url));
+console.log(
+  "DATABASE_URL has PostgreSQL scheme:",
+  /^postgres(ql)?:\/\//i.test(url ?? "")
+);
+console.log(
+  "DATABASE_URL has username/password structure:",
+  /^postgres(ql)?:\/\/[^:/@]+:[^@]+@/i.test(url ?? "")
+);
 const pool = new Pool(resolvePoolConfig());
 
 export async function ensureSchema() {
