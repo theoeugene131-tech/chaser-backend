@@ -33,7 +33,10 @@ import { Pool } from "pg";
  */
 function resolvePoolConfig() {
   if (process.env.DATABASE_URL) {
-    return { connectionString: process.env.DATABASE_URL };
+    return {
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+    };
   }
   if (process.env.DB_HOST) {
     return {
@@ -47,17 +50,7 @@ function resolvePoolConfig() {
   }
   return { connectionString: "postgres://postgres:devpassword@localhost:5432/chaser" };
 }
-const url = process.env.DATABASE_URL;
 
-console.log("DATABASE_URL present:", Boolean(url));
-console.log(
-  "DATABASE_URL has PostgreSQL scheme:",
-  /^postgres(ql)?:\/\//i.test(url ?? "")
-);
-console.log(
-  "DATABASE_URL has username/password structure:",
-  /^postgres(ql)?:\/\/[^:/@]+:[^@]+@/i.test(url ?? "")
-);
 const pool = new Pool(resolvePoolConfig());
 
 export async function ensureSchema() {
