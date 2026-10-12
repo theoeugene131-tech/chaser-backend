@@ -14,9 +14,7 @@ export async function sendVerificationEmail(to: string, name: string, verifyUrl:
   const fromAddress = process.env.EMAIL_FROM || "Invoice Chaser <onboarding@resend.dev>";
 
   if (!apiKey) {
-    console.log(`[email:dev-mode] Would send verification email to ${to}`);
-    console.log(`[email:dev-mode] Verification link: ${verifyUrl}`);
-    return { sent: false, mode: "dev-log" as const };
+    throw new Error("Email delivery is not configured: RESEND_API_KEY is missing.");
   }
 
   const res = await fetch(RESEND_API_URL, {
