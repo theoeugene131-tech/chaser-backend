@@ -10,7 +10,7 @@ import { User, Organization } from "../types";
 export const authRouter = Router();
 
 const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const PUBLIC_URL = process.env.API_PUBLIC_URL || "http://localhost:4000";
+const PUBLIC_URL = process.env.API_PUBLIC_URL || "https://chaser-backend-6jsv.onrender.com";
 
 function newVerificationToken() {
   return crypto.randomBytes(24).toString("hex");
@@ -122,6 +122,10 @@ authRouter.post("/resend-verification", async (req, res) => {
     await sendVerificationEmail(user.email, user.name, verifyUrl);
   } catch (err) {
     console.error("Failed to resend verification email:", err);
+    return res.status(503).json({
+      error: "EMAIL_DELIVERY_FAILED",
+      message: "The verification email could not be sent. Please try again later or contact support.",
+    });
   }
 
   res.json(genericResponse);
