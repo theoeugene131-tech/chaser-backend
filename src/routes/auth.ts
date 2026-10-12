@@ -49,18 +49,22 @@ authRouter.post("/signup", async (req, res) => {
   await db.insert("users", user);
 
   const verifyUrl = `${PUBLIC_URL}/api/auth/verify?token=${verificationToken}`;
+  let emailSent = false;
   try {
-    await sendVerificationEmail(email, name, verifyUrl);
+    const result = await sendVerificationEmail(email, name, verifyUrl);
+    emailSent = result.sent !== false;
   } catch (err) {
-    // Don't fail signup just because email sending had a hiccup — the
-    // account still exists and can request a resend.
+    // The account remains created, but the client must not claim an email was sent.
     console.error("Failed to send verification email:", err);
   }
 
   // No login token here on purpose — you must verify before you can log in.
   res.status(201).json({
     requiresVerification: true,
-    message: "Account created. Check your email to verify before logging in.",
+    emailSent,
+    message: emailSent
+      ? "Account created. Check your email to verify before logging in."
+      : "Account created, but the verification email could not be sent. Configure email delivery and request a resend.",
   });
 });
 
