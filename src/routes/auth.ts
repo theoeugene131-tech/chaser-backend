@@ -1,20 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import crypto from "crypto";
 import { db } from "../lib/db";
 import { hashPassword, verifyPassword, signToken } from "../lib/auth";
-import { sendVerificationEmail } from "../lib/email";
 import { User, Organization } from "../types";
 
 export const authRouter = Router();
-
-const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const PUBLIC_URL = process.env.API_PUBLIC_URL || "https://chaser-backend-6jsv.onrender.com";
-
-function newVerificationToken() {
-  return crypto.randomBytes(24).toString("hex");
-}
 
 const signupSchema = z.object({
   orgName: z.string().min(2),
@@ -34,114 +25,32 @@ authRouter.post("/signup", async (req, res) => {
   const org: Organization = { id: nanoid(), name: orgName, createdAt: new Date().toISOString() };
   await db.insert("organizations", org);
 
-  const verificationToken = newVerificationToken();
+  // Email verification is disabled. New accounts are active immediately.
   const user: User = {
     id: nanoid(),
     orgId: org.id,
     email,
     passwordHash: await hashPassword(password),
     name,
-    emailVerified: false,
-    verificationToken,
-    verificationTokenExpiresAt: new Date(Date.now() + VERIFICATION_TTL_MS).toISOString(),
+    emailVerified: true,
+    verificationToken: null,
+    verificationTokenExpiresAt: null,
     createdAt: new Date().toISOString(),
   };
   await db.insert("users", user);
 
-  const verifyUrl = `${PUBLIC_URL}/api/auth/verify?token=${verificationToken}`;
-  let emailSent = false;
-  try {
-    const result = await sendVerificationEmail(email, name, verifyUrl);
-    emailSent = result.sent !== false;
-  } catch (err) {
-    // The account remains created, but the client must not claim an email was sent.
-    console.error("Failed to send verification email:", err);
-  }
-
-  // No login token here on purpose — you must verify before you can log in.
+  const token = signToken({ userId: user.id, orgId: user.orgId });
   res.status(201).json({
-    requiresVerification: true,
-    emailSent,
-    message: emailSent
-      ? "Account created. Check your email to verify before logging in."
-      : "Account created, but the verification email could not be sent. Configure email delivery and request a resend.",
+    token,
+    user: { id: user.id, name: user.name, email: user.email },
   });
-});
-
-authRouter.get("/verify", async (req, res) => {
-  const token = typeof req.query.token === "string" ? req.query.token : "";
-  const users = (await db.table("users")) as User[];
-  const user = users.find((u) => u.verificationToken === token);
-
-  const htmlPage = (title: string, message: string, ok: boolean) => `
-    <!doctype html>
-    <html><head><meta charset="utf-8"><title>${title}</title></head>
-    <body style="font-family: sans-serif; background:#0F1B2D; color:#EDEAE0; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;">
-      <div style="text-align:center; max-width:400px; padding:32px;">
-        <div style="font-size:40px; margin-bottom:12px;">${ok ? "✅" : "⚠️"}</div>
-        <h2 style="margin:0 0 8px 0;">${title}</h2>
-        <p style="color:#8B9AAE;">${message}</p>
-      </div>
-    </body></html>
-  `;
-
-  if (!user) {
-    return res.status(400).send(htmlPage("Link not valid", "This verification link is invalid or has already been used.", false));
-  }
-  if (user.verificationTokenExpiresAt && new Date(user.verificationTokenExpiresAt) < new Date()) {
-    return res.status(400).send(htmlPage("Link expired", "This verification link has expired. Please request a new one from the login screen.", false));
-  }
-
-  await db.update("users", user.id, {
-    emailVerified: true,
-    verificationToken: null,
-    verificationTokenExpiresAt: null,
-  });
-
-  res.send(htmlPage("Email verified", "Your account is active — you can close this tab and log in.", true));
-});
-
-const resendSchema = z.object({ email: z.string().email() });
-
-authRouter.post("/resend-verification", async (req, res) => {
-  const parsed = resendSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-  const user = ((await db.table("users")) as User[]).find((u) => u.email === parsed.data.email);
-
-  // Always return the same generic response whether or not the account
-  // exists — avoids leaking which emails have accounts.
-  const genericResponse = { message: "If that account exists and isn't verified yet, a new email has been sent." };
-
-  if (!user || user.emailVerified) return res.json(genericResponse);
-
-  const verificationToken = newVerificationToken();
-  await db.update("users", user.id, {
-    verificationToken,
-    verificationTokenExpiresAt: new Date(Date.now() + VERIFICATION_TTL_MS).toISOString(),
-  });
-
-  const verifyUrl = `${PUBLIC_URL}/api/auth/verify?token=${verificationToken}`;
-  try {
-    await sendVerificationEmail(user.email, user.name, verifyUrl);
-  } catch (err) {
-    console.error("Failed to resend verification email:", err);
-    return res.status(503).json({
-      error: "EMAIL_DELIVERY_FAILED",
-      message: "The verification email could not be sent. Please try again later or contact support.",
-    });
-  }
-
-  res.json(genericResponse);
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string(),
 });
 
 authRouter.post("/login", async (req, res) => {
-  const parsed = loginSchema.safeParse(req.body);
+  const parsed = z.object({
+    email: z.string().email(),
+    password: z.string(),
+  }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const { email, password } = parsed.data;
 
@@ -150,12 +59,7 @@ authRouter.post("/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password" });
   }
 
-  // Users created before this feature shipped have emailVerified === true
-  // via the one-time backfill script — only new signups are gated here.
-  if (!user.emailVerified) {
-    return res.status(403).json({ error: "EMAIL_NOT_VERIFIED", message: "Please verify your email before logging in." });
-  }
-
+  // Email verification is disabled; existing accounts can log in directly.
   const token = signToken({ userId: user.id, orgId: user.orgId });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
 });
