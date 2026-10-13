@@ -4,6 +4,14 @@ import { nanoid } from "nanoid";
 import { db } from "../lib/db";
 import { hashPassword, verifyPassword, signToken } from "../lib/auth";
 import { User, Organization } from "../types";
+import { AuthedRequest, requireAuth } from "../middleware/requireAuth";
+
+export const TERMS_VERSION = "2026-10-13-v1";
+
+async function hasAcceptedTerms(userId: string) {
+  const records = await db.table("terms_acceptances");
+  return records.some((record: any) => record.userId === userId && record.version === TERMS_VERSION);
+}
 
 export const authRouter = Router();
 
@@ -43,6 +51,7 @@ authRouter.post("/signup", async (req, res) => {
   res.status(201).json({
     token,
     user: { id: user.id, name: user.name, email: user.email },
+    termsAccepted: await hasAcceptedTerms(user.id),
   });
 });
 
@@ -61,5 +70,23 @@ authRouter.post("/login", async (req, res) => {
 
   // Email verification is disabled; existing accounts can log in directly.
   const token = signToken({ userId: user.id, orgId: user.orgId });
-  res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  res.json({ token, user: { id: user.id, name: user.name, email: user.email }, termsAccepted: await hasAcceptedTerms(user.id) });
+});
+
+
+// Record explicit acceptance of the current Terms version for audit purposes.
+authRouter.post("/terms/accept", requireAuth, async (req: AuthedRequest, res) => {
+  const parsed = z.object({ version: z.string().min(1), accepted: z.literal(true) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Explicit acceptance is required" });
+  if (parsed.data.version !== TERMS_VERSION) return res.status(409).json({ error: "These Terms have changed. Reload the app and review the current version." });
+
+  const existing = (await db.table("terms_acceptances")).find((record: any) => record.userId === req.auth!.userId && record.version === TERMS_VERSION);
+  if (!existing) {
+    await db.insert("terms_acceptances", {
+      id: nanoid(), userId: req.auth!.userId, orgId: req.auth!.orgId,
+      version: TERMS_VERSION, acceptedAt: new Date().toISOString(),
+      ipAddress: req.ip, userAgent: req.get("user-agent") || null,
+    });
+  }
+  res.json({ accepted: true, version: TERMS_VERSION });
 });
