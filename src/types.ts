@@ -58,6 +58,8 @@ export interface Payment {
   receivedAt: string;
   source: InvoiceSource;
   externalRef: string | null;
+  paymentMethod?: "bank_transfer" | "cash" | "check" | "card" | "mobile_money" | "other";
+  note?: string | null;
   matched: boolean;
   createdAt: string;
 }
