@@ -143,8 +143,22 @@ invoicesRouter.post("/:id/escalate", async (req: AuthedRequest, res) => {
 
 const recordPaymentSchema = z.object({
   amountCents: z.number().int().positive(),
-  receivedAt: z.string().optional(),
-  note: z.string().optional(),
+  receivedAt: z.string().datetime().optional(),
+  paymentMethod: z.enum(["bank_transfer", "cash", "check", "card", "mobile_money", "other"]).default("other"),
+  externalRef: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(1000).optional(),
+});
+
+// List the payment history for an invoice, scoped to the authenticated organization.
+invoicesRouter.get("/:id/payments", async (req: AuthedRequest, res) => {
+  const orgId = req.auth!.orgId;
+  const invoice = (await db.find("invoices", String(req.params.id))) as Invoice | null;
+  if (!invoice || invoice.orgId !== orgId) return res.status(404).json({ error: "Invoice not found" });
+
+  const payments = (await db.table("payments"))
+    .filter((p: any) => p.orgId === orgId && p.invoiceId === invoice.id)
+    .sort((a: any, b: any) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
+  res.json({ payments, remainingCents: Math.max(0, invoice.amountCents - invoice.amountPaidCents) });
 });
 
 // Record a payment that arrived outside any connected integration —
@@ -157,11 +171,22 @@ invoicesRouter.post("/:id/record-payment", async (req: AuthedRequest, res) => {
 
   const parsed = recordPaymentSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const { amountCents, receivedAt, note } = parsed.data;
+  const { amountCents, receivedAt, paymentMethod, externalRef, note } = parsed.data;
+
+  const remainingCents = invoice.amountCents - invoice.amountPaidCents;
+  if (remainingCents <= 0 || invoice.status === "paid") {
+    return res.status(409).json({ error: "This invoice is already fully paid." });
+  }
+  if (amountCents > remainingCents) {
+    return res.status(400).json({
+      error: `Payment exceeds the remaining balance of ${(remainingCents / 100).toFixed(2)} ${invoice.currency.toUpperCase()}.`,
+      remainingCents,
+    });
+  }
 
   const now = new Date().toISOString();
   const newPaidCents = invoice.amountPaidCents + amountCents;
-  const fullyPaid = newPaidCents >= invoice.amountCents;
+  const fullyPaid = newPaidCents === invoice.amountCents;
 
   await db.update("invoices", invoice.id, {
     amountPaidCents: newPaidCents,
@@ -178,7 +203,9 @@ invoicesRouter.post("/:id/record-payment", async (req: AuthedRequest, res) => {
     currency: invoice.currency,
     receivedAt: receivedAt ? new Date(receivedAt).toISOString() : now,
     source: "manual",
-    externalRef: null,
+    paymentMethod,
+    externalRef: externalRef?.trim() || null,
+    note: note?.trim() || null,
     matched: true,
     createdAt: now,
   });
@@ -196,7 +223,7 @@ invoicesRouter.post("/:id/record-payment", async (req: AuthedRequest, res) => {
     createdAt: now,
   });
 
-  res.json({ ok: true, fullyPaid });
+  res.json({ ok: true, fullyPaid, amountPaidCents: newPaidCents, remainingCents: invoice.amountCents - newPaidCents });
 });
 
 const addNoteSchema = z.object({ note: z.string().min(1) });
