@@ -291,6 +291,10 @@ invoicesRouter.patch("/:id", async (req: AuthedRequest, res) => {
   const parsed = editInvoiceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  if (parsed.data.amountCents !== undefined && parsed.data.amountCents < (invoice.amountPaidCents || 0)) {
+    return res.status(400).json({ error: "Invoice total cannot be less than payments already recorded." });
+  }
+
   const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
   if (parsed.data.number !== undefined) patch.number = parsed.data.number;
   if (parsed.data.amountCents !== undefined) patch.amountCents = parsed.data.amountCents;
