@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { verifyToken } from "../lib/auth";
 import { db } from "../lib/db";
 
-const CURRENT_TERMS_VERSION = "2026-10-13-v1";
+const CURRENT_TERMS_VERSION = "2026-10-15-v3";
 
 export interface AuthedRequest extends Request {
   auth?: { userId: string; orgId: string };
