@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword, signToken } from "../lib/auth";
 import { User, Organization } from "../types";
 import { AuthedRequest, requireAuth } from "../middleware/requireAuth";
 
-export const TERMS_VERSION = "2026-10-15-v2";
+export const TERMS_VERSION = "2026-10-15-v3";
 
 async function hasAcceptedTerms(userId: string) {
   const records = await db.table("terms_acceptances");
