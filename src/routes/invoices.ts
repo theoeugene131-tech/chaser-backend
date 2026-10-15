@@ -84,7 +84,7 @@ invoicesRouter.get("/", async (req: AuthedRequest, res) => {
   const enriched = invoices.map((inv) => {
     const customer = customers.find((c) => c.id === inv.customerId);
     const daysPastDue = Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / 86_400_000);
-    return { ...inv, customerName: customer?.name ?? "Unknown", daysPastDue };
+    return { ...inv, customerName: customer?.name ?? "Unknown", customerEmail: customer?.email ?? "", daysPastDue };
   });
 
   const filtered = q
