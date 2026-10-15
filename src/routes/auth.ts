@@ -74,6 +74,29 @@ authRouter.post("/login", async (req, res) => {
 });
 
 
+
+// Change password for the currently authenticated user. Require the current password
+// so a stolen active session alone cannot silently replace account credentials.
+authRouter.post("/password/change", requireAuth, async (req: AuthedRequest, res) => {
+  const parsed = z.object({
+    currentPassword: z.string().min(1),
+    newPassword: z.string().min(8).max(128),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter your current password and a new password of at least 8 characters." });
+
+  const users = (await db.table("users")) as User[];
+  const user = users.find((u) => u.id === req.auth!.userId);
+  if (!user || !(await verifyPassword(parsed.data.currentPassword, user.passwordHash))) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+  if (await verifyPassword(parsed.data.newPassword, user.passwordHash)) {
+    return res.status(400).json({ error: "Choose a new password that differs from your current password." });
+  }
+
+  await db.update("users", user.id, { passwordHash: await hashPassword(parsed.data.newPassword) });
+  res.json({ changed: true });
+});
+
 // Record explicit acceptance of the current Terms version for audit purposes.
 authRouter.post("/terms/accept", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = z.object({ version: z.string().min(1), accepted: z.literal(true) }).safeParse(req.body);
