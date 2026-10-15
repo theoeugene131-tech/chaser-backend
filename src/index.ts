@@ -9,6 +9,7 @@ import { invoicesRouter } from "./routes/invoices";
 import { customersRouter } from "./routes/customers";
 import { integrationsRouter } from "./routes/integrations";
 import { jobsRouter } from "./routes/jobs";
+import { analyticsRouter } from "./routes/analytics";
 
 const app = express();
 app.use(cors());
@@ -23,6 +24,7 @@ app.use("/api/invoices", invoicesRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/integrations", integrationsRouter);
 app.use("/api/jobs", jobsRouter);
+app.use("/api/analytics", analyticsRouter);
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
