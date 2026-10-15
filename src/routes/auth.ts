@@ -25,9 +25,10 @@ const signupSchema = z.object({
 authRouter.post("/signup", async (req, res) => {
   const parsed = signupSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const { orgName, name, email, password } = parsed.data;
+  const { orgName, name, password } = parsed.data;
+  const email = parsed.data.email.trim().toLowerCase();
 
-  const existing = ((await db.table("users")) as User[]).find((u) => u.email === email);
+  const existing = ((await db.table("users")) as User[]).find((u) => u.email.trim().toLowerCase() === email);
   if (existing) return res.status(409).json({ error: "An account with that email already exists" });
 
   const org: Organization = { id: nanoid(), name: orgName, createdAt: new Date().toISOString() };
@@ -61,9 +62,10 @@ authRouter.post("/login", async (req, res) => {
     password: z.string(),
   }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const { email, password } = parsed.data;
+  const { password } = parsed.data;
+  const email = parsed.data.email.trim().toLowerCase();
 
-  const user = ((await db.table("users")) as User[]).find((u) => u.email === email);
+  const user = ((await db.table("users")) as User[]).find((u) => u.email.trim().toLowerCase() === email);
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
