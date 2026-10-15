@@ -37,12 +37,19 @@ analyticsRouter.post("/event", async (req, res) => {
 });
 
 analyticsRouter.get("/owner", requireAuth, async (req: AuthedRequest, res) => {
-  const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
-  if (!ownerEmail) return res.status(503).json({ error: "OWNER_EMAIL is not configured on the server" });
+  // Configure ADMIN_EMAILS on the server as a comma-separated allowlist.
+  // OWNER_EMAIL remains supported for backwards compatibility during setup.
+  const adminEmails = [
+    ...(process.env.ADMIN_EMAILS || "").split(","),
+    process.env.OWNER_EMAIL || "",
+  ].map((email) => email.trim().toLowerCase()).filter(Boolean);
+  if (adminEmails.length === 0) {
+    return res.status(503).json({ error: "ADMIN_EMAILS is not configured on the server" });
+  }
 
   const users = (await db.table("users")) as User[];
   const owner = users.find((u) => u.id === req.auth!.userId);
-  if (!owner || owner.email.toLowerCase() !== ownerEmail) {
+  if (!owner || !adminEmails.includes(owner.email.trim().toLowerCase())) {
     return res.status(403).json({ error: "Owner access only" });
   }
 
