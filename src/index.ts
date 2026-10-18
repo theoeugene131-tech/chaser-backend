@@ -12,7 +12,31 @@ import { jobsRouter } from "./routes/jobs";
 import { analyticsRouter } from "./routes/analytics";
 
 const app = express();
-app.use(cors());
+
+const allowedOrigins = new Set(
+  (process.env.FRONTEND_ORIGIN || "https://chaser-frontend-two.vercel.app")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+
+if (process.env.NODE_ENV !== "production") {
+  allowedOrigins.add("http://localhost:5173");
+  allowedOrigins.add("http://127.0.0.1:5173");
+}
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Permit requests without an Origin header (e.g. health checks/server-to-server).
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Origin not allowed by CORS"));
+    },
+  }),
+);
 app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "chaser-backend" }));
