@@ -5,6 +5,10 @@ import { hashPassword } from "./lib/auth";
 import { runEscalationSweep } from "./services/escalation";
 
 async function seed() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Refusing to seed demo data in production.");
+  }
+
   await ensureSchema();
   await db.reset();
 
