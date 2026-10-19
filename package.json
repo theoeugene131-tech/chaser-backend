@@ -10,7 +10,8 @@
     "seed": "tsx src/seed.ts",
     "cron:sweep": "tsx src/cron-sweep.ts",
     "rotate-demo-password": "tsx src/rotate-demo-password.ts",
-    "backfill-verified-users": "tsx src/backfill-verified-users.ts"
+    "backfill-verified-users": "tsx src/backfill-verified-users.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "keywords": [],
   "author": "",
