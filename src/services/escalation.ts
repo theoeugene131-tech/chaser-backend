@@ -1,63 +1,94 @@
 import { db } from "../lib/db";
-import { Invoice } from "../types";
+import { Invoice, Organization } from "../types";
 import { nanoid } from "nanoid";
+import { daysPastDue, sendCustomerReminder, sendEscalationAlert, ReminderOutcome } from "./reminders";
 
-/**
- * Default cadence, in days-past-due, if an org hasn't customized its
- * escalation rules. Mirrors the pitch copy: friendly nudge -> firmer
- * reminders -> human escalation.
- */
 const DEFAULT_CADENCE = [
-  { daysPastDue: -3, action: "reminder" as const, tone: "Invoice due soon — friendly nudge sent" },
-  { daysPastDue: 1, action: "reminder" as const, tone: "1st overdue reminder sent" },
-  { daysPastDue: 14, action: "reminder" as const, tone: "2nd reminder sent — tone firmed up" },
-  { daysPastDue: 30, action: "reminder" as const, tone: "3rd and final reminder sent" },
-  { daysPastDue: 45, action: "escalate" as const, tone: "No response after 3 touches — routed to a collections specialist" },
+  { daysPastDue: -3, action: "reminder" as const, label: "Due-soon reminder" },
+  { daysPastDue: 1, action: "reminder" as const, label: "First overdue reminder" },
+  { daysPastDue: 14, action: "reminder" as const, label: "Second reminder" },
+  { daysPastDue: 30, action: "reminder" as const, label: "Final reminder" },
+  { daysPastDue: 45, action: "escalate" as const, label: "Human follow-up escalation" },
 ];
 
-/**
- * Runs the cadence against every open invoice for an org. In production
- * this is triggered by a scheduled job (cron / queue worker) — see
- * README "Running the daily job". Each run is idempotent: an invoice
- * only fires the next matching step once, tracked via reminderCount.
- */
-export async function runEscalationSweep(orgId: string): Promise<{ touched: number }> {
-  const invoices = ((await db.table("invoices")) as Invoice[]).filter(
-    (inv) => inv.orgId === orgId && inv.status !== "paid" && inv.status !== "disputed"
-  );
+export interface SweepResult {
+  touched: number;
+  sent: number;
+  logged: number;
+  skipped: number;
+  failed: number;
+}
 
-  const today = new Date();
-  let touched = 0;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function runEscalationSweep(orgId: string): Promise<SweepResult> {
+  const invoices = ((await db.table("invoices")) as Invoice[]).filter(
+    (invoice) => invoice.orgId === orgId && invoice.status !== "paid" && invoice.status !== "disputed",
+  );
+  const result: SweepResult = { touched: 0, sent: 0, logged: 0, skipped: 0, failed: 0 };
+  const now = new Date();
 
   for (const invoice of invoices) {
-    const daysPastDue = Math.floor((today.getTime() - new Date(invoice.dueDate).getTime()) / 86_400_000);
-    const step = [...DEFAULT_CADENCE].reverse().find((s) => daysPastDue >= s.daysPastDue);
+    const days = daysPastDue(invoice, now);
+    const step = [...DEFAULT_CADENCE].reverse().find((candidate) => days >= candidate.daysPastDue);
     if (!step) continue;
-
     const stepIndex = DEFAULT_CADENCE.indexOf(step);
-    if (invoice.reminderCount > stepIndex) continue; // already fired this step or later
+    if ((invoice.reminderCount || 0) > stepIndex) continue;
 
-    const isEscalation = step.action === "escalate";
+    const escalation = step.action === "escalate";
+    const outcome: ReminderOutcome = escalation
+      ? await sendEscalationAlert(invoice, now)
+      : await sendCustomerReminder(invoice, now);
+
+    if (outcome.status === "failed") {
+      result.failed += 1;
+      console.error(`[sweep] Invoice ${invoice.number}: ${outcome.detail}`);
+      continue;
+    }
+    if (outcome.status === "skipped" && !escalation) {
+      result.skipped += 1;
+      continue;
+    }
 
     await db.update("invoices", invoice.id, {
-      status: isEscalation ? "escalated" : "reminder",
+      status: escalation ? "escalated" : "reminder",
       reminderCount: stepIndex + 1,
-      lastReminderAt: today.toISOString(),
-      updatedAt: today.toISOString(),
+      lastReminderAt: now.toISOString(),
+      updatedAt: now.toISOString(),
     });
-
     await db.insert("inboxEvents", {
       id: nanoid(),
       orgId,
-      type: isEscalation ? "escalated" : "reminder",
+      type: escalation ? "escalated" : "reminder",
       customerId: invoice.customerId,
       invoiceId: invoice.id,
-      detail: `${step.tone} — invoice ${invoice.number}`,
-      createdAt: today.toISOString(),
+      detail: `${step.label} — invoice ${invoice.number} (${outcome.detail})`,
+      createdAt: now.toISOString(),
     });
 
-    touched += 1;
+    result.touched += 1;
+    if (outcome.status === "sent") {
+      result.sent += 1;
+      await sleep(600);
+    } else if (outcome.status === "logged") {
+      result.logged += 1;
+    } else {
+      result.skipped += 1;
+    }
   }
+  return result;
+}
 
-  return { touched };
+export async function runAllOrgsSweep(): Promise<Record<string, SweepResult>> {
+  const organizations = (await db.table("organizations")) as Organization[];
+  const results: Record<string, SweepResult> = {};
+  for (const organization of organizations) {
+    try {
+      results[organization.id] = await runEscalationSweep(organization.id);
+    } catch (error) {
+      console.error(`[sweep] Organization ${organization.id} failed:`, error);
+      results[organization.id] = { touched: 0, sent: 0, logged: 0, skipped: 0, failed: 1 };
+    }
+  }
+  return results;
 }
