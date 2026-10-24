@@ -71,14 +71,8 @@ export async function runEscalationSweep(orgId: string): Promise<SweepResult> {
     });
 
     result.touched += 1;
-    if (outcome.status === "sent") {
-      result.sent += 1;
-      await sleep(600);
-    } else if (outcome.status === "logged") {
-      result.logged += 1;
-    } else {
-      result.skipped += 1;
-    }
+    result.sent += 1;
+    await sleep(600);
   }
   return result;
 }
