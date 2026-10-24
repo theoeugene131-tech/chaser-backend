@@ -5,6 +5,7 @@ import { sendEmail, escapeHtml } from "../src/lib/reminderEmail";
 import { db } from "../src/lib/db";
 import { sendCustomerReminder } from "../src/services/reminders";
 import { runEscalationSweep } from "../src/services/escalation";
+import { sendEscalationAlert } from "../src/services/reminders";
 
 test("reminder tone gets firmer as an invoice ages", () => {
   assert.equal(toneFor(-3), "friendly");
@@ -130,6 +131,46 @@ test("daily sweep advances a cadence step only once after provider acceptance", 
     assert.equal(second.sent, 0);
     assert.equal(sends, 1);
     assert.equal(invoice.reminderCount, 2);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = oldKey;
+    if (oldFrom === undefined) delete process.env.EMAIL_FROM; else process.env.EMAIL_FROM = oldFrom;
+    if (oldNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = oldNodeEnv;
+  }
+});
+
+
+test("escalation email is sent to every verified team member in the same organization", async (t) => {
+  const org = { id: "org-3", name: "Example Co", createdAt: "2026-10-01T00:00:00.000Z" };
+  const team = [
+    { id: "user-a", orgId: "org-3", name: "Owner A", email: "a@example.com", emailVerified: true },
+    { id: "user-b", orgId: "org-3", name: "Owner B", email: "b@example.com", emailVerified: true },
+    { id: "user-c", orgId: "org-other", name: "Other Org", email: "other@example.com", emailVerified: true },
+  ];
+  const oldKey = process.env.RESEND_API_KEY;
+  const oldFrom = process.env.EMAIL_FROM;
+  const oldNodeEnv = process.env.NODE_ENV;
+  const oldFetch = globalThis.fetch;
+  const recipients: string[] = [];
+  try {
+    process.env.RESEND_API_KEY = "test-key";
+    process.env.EMAIL_FROM = "Invoice Chaser <billing@example.com>";
+    process.env.NODE_ENV = "production";
+    globalThis.fetch = (async (_input: any, init?: any) => {
+      recipients.push(JSON.parse(init?.body || "{}").to[0]);
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    t.mock.method(db, "find", async () => ({ id: "cust-3", orgId: "org-3", name: "Customer", email: "customer@example.com" }));
+    t.mock.method(db, "table", async (name: string) => name === "organizations" ? [org] : name === "users" ? team : []);
+    const result = await sendEscalationAlert({
+      id: "inv-3", orgId: "org-3", customerId: "cust-3", number: "INV-3",
+      amountCents: 10000, amountPaidCents: 0, currency: "GBP",
+      dueDate: "2026-09-01T00:00:00.000Z", issuedDate: "2026-08-01T00:00:00.000Z",
+      status: "escalated", source: "manual", externalId: null, lastReminderAt: null,
+      reminderCount: 4, createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    assert.equal(result.status, "sent");
+    assert.deepEqual(recipients.sort(), ["a@example.com", "b@example.com"]);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = oldKey;
