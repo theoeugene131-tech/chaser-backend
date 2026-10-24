@@ -18,9 +18,13 @@ export async function sendEmail(msg: OutgoingEmail): Promise<SendResult> {
     return { sent: false };
   }
 
-  const configuredFrom = process.env.EMAIL_FROM || "Invoice Chaser <onboarding@resend.dev>";
+  const configuredFrom = process.env.EMAIL_FROM?.trim();
+  if (!configuredFrom) throw new Error("EMAIL_FROM must be set to a sender address verified with Resend");
   const match = configuredFrom.match(/<([^>]+)>/);
   const address = (match ? match[1] : configuredFrom).trim();
+  if (!/^[^\\s<>@]+@[^\\s<>@]+\\.[^\\s<>@]+$/.test(address)) {
+    throw new Error("EMAIL_FROM must contain a valid sender email address verified with Resend");
+  }
   const name = (msg.fromName || "Invoice Chaser").replace(/[<>"\r\n]/g, "").slice(0, 80);
   const response = await fetch(process.env.RESEND_API_URL || "https://api.resend.com/emails", {
     method: "POST",
