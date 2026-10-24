@@ -45,8 +45,12 @@ export async function runEscalationSweep(orgId: string): Promise<SweepResult> {
       console.error(`[sweep] Invoice ${invoice.number}: ${outcome.detail}`);
       continue;
     }
-    if (outcome.status === "skipped" && !escalation) {
-      result.skipped += 1;
+    // Do not advance the cadence unless an email provider confirms delivery
+    // acceptance. This also prevents development-mode log-only results and
+    // missing escalation recipients from being recorded as completed reminders.
+    if (outcome.status !== "sent") {
+      if (outcome.status === "logged") result.logged += 1;
+      else result.skipped += 1;
       continue;
     }
 
