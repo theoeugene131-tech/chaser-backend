@@ -22,7 +22,7 @@ export async function sendEmail(msg: OutgoingEmail): Promise<SendResult> {
   if (!configuredFrom) throw new Error("EMAIL_FROM must be set to a sender address verified with Resend");
   const match = configuredFrom.match(/<([^>]+)>/);
   const address = (match ? match[1] : configuredFrom).trim();
-  if (!/^[^\\s<>@]+@[^\\s<>@]+\\.[^\\s<>@]+$/.test(address)) {
+  if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(address)) {
     throw new Error("EMAIL_FROM must contain a valid sender email address verified with Resend");
   }
   const name = (msg.fromName || "Invoice Chaser").replace(/[<>"\r\n]/g, "").slice(0, 80);
