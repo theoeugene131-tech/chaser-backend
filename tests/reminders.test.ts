@@ -13,7 +13,7 @@ test("reminder tone gets firmer as an invoice ages", () => {
 
 test("currency amounts are formatted with a safe fallback", () => {
   assert.equal(formatAmount(123456, "usd"), "$1,234.56");
-  assert.match(formatAmount(1000, "zzz"), /10\\.00/);
+  assert.match(formatAmount(1000, "zzz"), /10\.00/);
 });
 
 test("days past due counts whole days", () => {
@@ -73,7 +73,7 @@ test("email provider acceptance is reported as sent and provider errors are surf
     assert.deepEqual(await sendEmail({ to: "customer@example.com", subject: "Test", html: "<p>Test</p>", text: "Test" }), { sent: true });
 
     globalThis.fetch = (async () => new Response("invalid sender", { status: 422 })) as typeof fetch;
-    await assert.rejects(() => sendEmail({ to: "customer@example.com", subject: "Test", html: "<p>Test</p>", text: "Test" }), /Resend API error \\(422\\)/);
+    await assert.rejects(() => sendEmail({ to: "customer@example.com", subject: "Test", html: "<p>Test</p>", text: "Test" }), /Resend API error \(422\)/);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = oldKey;
