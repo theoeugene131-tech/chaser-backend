@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AuthedRequest, requireAuth } from "../middleware/requireAuth";
 import { db } from "../lib/db";
 import { Invoice, Customer } from "../types";
+import { sendCustomerReminder } from "../services/reminders";
 
 export const invoicesRouter = Router();
 invoicesRouter.use(requireAuth);
@@ -94,16 +95,33 @@ invoicesRouter.get("/", async (req: AuthedRequest, res) => {
   res.json({ invoices: filtered.sort((a, b) => b.daysPastDue - a.daysPastDue) });
 });
 
-// Manually fire a reminder outside the normal cadence (e.g. AR manager clicks "nudge now").
+// Send a real email for the manual "Nudge now" action. Do not change invoice
+// state or claim success unless the provider confirms that the email was accepted.
 invoicesRouter.post("/:id/remind", async (req: AuthedRequest, res) => {
   const orgId = req.auth!.orgId;
   const invoice = (await db.find("invoices", String(req.params.id))) as Invoice | null;
   if (!invoice || invoice.orgId !== orgId) return res.status(404).json({ error: "Invoice not found" });
+  if (invoice.status === "paid" || invoice.status === "disputed") {
+    return res.status(409).json({ error: "Paid or disputed invoices cannot be reminded." });
+  }
 
+  const outcome = await sendCustomerReminder(invoice);
+  if (outcome.status === "skipped") {
+    return res.status(422).json({ error: "Reminder not sent", detail: outcome.detail });
+  }
+  if (outcome.status === "failed") {
+    return res.status(502).json({ error: "Reminder email failed", detail: outcome.detail });
+  }
+  if (outcome.status !== "sent") {
+    return res.status(503).json({ error: "Email was not sent. Configure production email settings first.", detail: outcome.detail });
+  }
+
+  const now = new Date().toISOString();
   await db.update("invoices", invoice.id, {
     status: "reminder",
-    lastReminderAt: new Date().toISOString(),
-    reminderCount: invoice.reminderCount + 1,
+    lastReminderAt: now,
+    reminderCount: (invoice.reminderCount || 0) + 1,
+    updatedAt: now,
   });
 
   await db.insert("inboxEvents", {
@@ -112,11 +130,11 @@ invoicesRouter.post("/:id/remind", async (req: AuthedRequest, res) => {
     type: "reminder",
     customerId: invoice.customerId,
     invoiceId: invoice.id,
-    detail: `Manual reminder sent for invoice ${invoice.number}`,
-    createdAt: new Date().toISOString(),
+    detail: `Manual reminder email accepted by provider for invoice ${invoice.number} (${outcome.detail})`,
+    createdAt: now,
   });
 
-  res.json({ ok: true });
+  res.json({ ok: true, sent: true, detail: outcome.detail });
 });
 
 invoicesRouter.post("/:id/escalate", async (req: AuthedRequest, res) => {
